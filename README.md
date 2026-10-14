@@ -1,83 +1,37 @@
-# Kaggleで日本語特化型TTS (Style-Bert-VITS2) を動かすガイド
+# Kaggleで日本語TTS・自分の声クローン
 
-このガイドでは、Kaggle Notebook上で高品質な日本語音声合成モデル **Style-Bert-VITS2** を使用して音声を生成する手順を説明します。
+KaggleのGPU環境を使い、日本語の音声合成を試しながら、最終的に**自分の声で日本語テキストを読み上げる**ことを目指すガイドです。
 
-## 1. 依存関係のインストール
+## 方針
 
-Kaggle環境で必要なライブラリをインストールします。GPU（T4 x2 または P100）が有効であることを確認してください。
+- 実行環境：Kaggle Notebooks（GPUを有効化）
+- 声クローン候補：[GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) — 参照音声からの音声生成と追加学習を検討
+- 日本語TTSの比較対象：[Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2)
+- 手順はこのリポジトリに接ぎ木し、別リポジトリを増やさない
 
-```python
-# Style-Bert-VITS2本体のインストール
-!pip install style-bert-vits2
+## 実験順
 
-# 日本語処理に必要な辞書のインストール
-!pip install pyopenjtalk
-```
+1. Kaggle NotebookでGPUと作業領域を確認する。
+2. 自分の声を静かな環境で録音する。
+3. `001-voice-data.ipynb` で音声を読み込み、モノラル・32 kHz WAVに変換する。
+4. GPT-SoVITSで参照音声を使った日本語読み上げを試す。
+5. 声の類似度・発音・自然さを確認し、必要な場合だけ追加学習を検討する。
 
-## 2. BERTモデルと音声合成モデルの準備
+## 録音の目安
 
-日本語の自然なイントネーションを生成するために必要なBERTモデルと、デフォルトの音声モデルをロードします。
+- まずは数十秒の明瞭な音声から試す。追加学習をする場合は、別途まとまった録音データを用意する。
+- 参照音声の内容が分かる文字起こしを用意する。
+- 自分の録音やモデルは個人情報として扱い、公開データセットや公開Notebookに含めない。
 
-```python
-from style_bert_vits2.nlp import bert_models
-from style_bert_vits2.constants import Languages
-from style_bert_vits2.tts_model import TTSModel
-import torch
+## Kaggleでの注意
 
-# デバイスの設定
-device = "cuda" if torch.cuda.is_available() else "cpu"
+- GPUの種類・利用可能時間・インターネット設定はセッションによって異なる。
+- セッション終了で作業領域のファイルが失われる場合がある。必要な成果物は非公開の保存先へ保管する。
+- 依存関係やモデルの取得方法は更新されるため、実行結果を確認してから手順を固定する。
 
-# 日本語用BERTモデルのロード
-bert_models.load_model(Languages.JP, "ku-nlp/deberta-v2-large-japanese-char-wwm")
-bert_models.load_tokenizer(Languages.JP, "ku-nlp/deberta-v2-large-japanese-char-wwm")
+## 次に実装すること
 
-# デフォルトの音声モデル（JVNVモデル等）をHugging Faceからダウンロードしてロード
-# 初回実行時はダウンロードに少し時間がかかります
-model_file = "model_assets/jvnv-F1-jp/jvnv-F1-jp_e160_s14000.safetensors"
-config_file = "model_assets/jvnv-F1-jp/config.json"
-style_file = "model_assets/jvnv-F1-jp/style_vectors.alps"
-
-# モデルの初期化（JVNV-F1モデルを例に）
-# 既存のモデルがない場合は、公式リポジトリのinitialize.pyと同様の処理を行うか、
-# 手動でAssetsから取得したパスを指定します。
-# ここではライブラリのデフォルト機能を利用したロード例を示します。
-
-# ※注意: Kaggleでは /kaggle/working/ 以下のパスを使用します。
-```
-
-## 3. 音声生成の実行
-
-テキストを入力して音声を生成し、ファイルに保存します。
-
-```python
-from style_bert_vits2.tts_model import TTSModel
-
-# モデルのロード（パスは適宜調整してください）
-# assets_root を指定して、モデルファイルを管理しやすくします。
-tts = TTSModel(
-    model_path="path/to/your/model.safetensors",
-    config_path="path/to/your/config.json",
-    style_vec_path="path/to/your/style_vectors.alps",
-    device=device
-)
-
-text = "こんにちは。これはカグルで動かしている日本語の音声合成テストです。"
-
-# 音声生成
-sr, audio = tts.infer(text=text)
-
-# 保存
-import soundfile as sf
-sf.write("output_jp.wav", audio, sr)
-```
-
-## 4. Notebookでの再生
-
-```python
-from IPython.display import Audio
-Audio("output_jp.wav")
-```
-
-## 5. 便利なTips
-- **感情制御**: Style-Bert-VITS2は「スタイル」を指定することで、喜び、悲しみ、怒りなどの感情を込めることができます。
-- **話者変更**: 複数のモデルファイルを切り替えることで、異なるキャラクターの声で読み上げが可能です。
+- [ ] GPT-SoVITSのKaggle向けセットアップ
+- [ ] 参照音声と文字起こしを指定した日本語音声生成
+- [ ] 出力音声の再生・ダウンロード
+- [ ] 必要な場合のみ追加学習の手順を追加
