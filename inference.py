@@ -1,59 +1,81 @@
-import os
-import torch
-import soundfile as sf
-from style_bert_vits2.nlp import bert_models
-from style_bert_vits2.constants import Languages
-from style_bert_vits2.tts_model import TTSModel
+"""GPT-SoVITS API client for Japanese voice cloning.
 
-def setup_jp_tts(model_dir):
-    """
-    日本語TTSモデルのセットアップ
-    model_dir: モデルファイル(.safetensors, config.json, style_vectors.alps)が格納されているディレクトリ
-    """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    # BERTモデルのロード
-    print("Loading BERT models...")
-    bert_models.load_model(Languages.JP, "ku-nlp/deberta-v2-large-japanese-char-wwm")
-    bert_models.load_tokenizer(Languages.JP, "ku-nlp/deberta-v2-large-japanese-char-wwm")
-    
-    # モデルファイルの特定
-    model_path = None
-    config_path = None
-    style_path = None
-    
-    for f in os.listdir(model_dir):
-        if f.endswith(".safetensors"):
-            model_path = os.path.join(model_dir, f)
-        elif f == "config.json":
-            config_path = os.path.join(model_dir, f)
-        elif f.endswith(".alps") or f == "style_vectors.p":
-            style_path = os.path.join(model_dir, f)
-            
-    if not all([model_path, config_path, style_path]):
-        raise FileNotFoundError("必要なモデルファイルが見つかりません。")
-        
-    print(f"Loading TTS model from {model_path}...")
-    tts = TTSModel(
-        model_path=model_path,
-        config_path=config_path,
-        style_vec_path=style_path,
-        device=device
+The model and API server are managed by the Kaggle notebook.
+This file only sends inference requests and saves the returned WAV.
+"""
+
+import argparse
+from pathlib import Path
+
+import requests
+
+
+def generate_jp_speech(
+    text: str,
+    ref_audio_path: str,
+    prompt_text: str,
+    output_path: str = "generated.wav",
+    api_url: str = "http://127.0.0.1:9880",
+) -> Path:
+    """Generate Japanese speech using a reference recording and its transcript."""
+    audio_path = Path(ref_audio_path)
+    if not audio_path.is_file():
+        raise FileNotFoundError(f"Reference audio not found: {audio_path}")
+    if not text.strip():
+        raise ValueError("Target text must not be empty.")
+    if not prompt_text.strip():
+        raise ValueError("Reference transcript must not be empty.")
+
+    payload = {
+        "text": text,
+        "text_lang": "ja",
+        "ref_audio_path": str(audio_path.resolve()),
+        "prompt_text": prompt_text,
+        "prompt_lang": "ja",
+        "text_split_method": "cut5",
+        "batch_size": 1,
+        "media_type": "wav",
+        "streaming_mode": False,
+    }
+    response = requests.post(
+        f"{api_url.rstrip('/')}/tts",
+        json=payload,
+        timeout=600,
     )
-    
-    return tts
+    if response.status_code != 200 or not response.content.startswith(b"RIFF"):
+        detail = response.text[:2000] if not response.content.startswith(b"RIFF") else ""
+        raise RuntimeError(
+            f"GPT-SoVITS API failed (HTTP {response.status_code}). {detail}"
+        )
 
-def generate_jp_speech(tts, text, output_path="output.wav"):
-    """
-    日本語音声を生成
-    """
-    print(f"Generating speech for: {text}")
-    sr, audio = tts.infer(text=text)
-    sf.write(output_path, audio, sr)
-    print(f"Saved to {output_path}")
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(response.content)
+    return destination
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate Japanese speech through a running GPT-SoVITS API."
+    )
+    parser.add_argument("--text", required=True, help="Japanese text to speak")
+    parser.add_argument("--ref-audio", required=True, help="Reference WAV path")
+    parser.add_argument(
+        "--prompt-text", required=True, help="Exact transcript of the reference WAV"
+    )
+    parser.add_argument("--output", default="generated.wav", help="Output WAV path")
+    parser.add_argument("--api-url", default="http://127.0.0.1:9880")
+    args = parser.parse_args()
+
+    result = generate_jp_speech(
+        text=args.text,
+        ref_audio_path=args.ref_audio,
+        prompt_text=args.prompt_text,
+        output_path=args.output,
+        api_url=args.api_url,
+    )
+    print(f"Saved generated speech: {result.resolve()}")
+
 
 if __name__ == "__main__":
-    # 使用例
-    # tts = setup_jp_tts("./model_assets/my_model")
-    # generate_jp_speech(tts, "こんにちは、世界！")
-    pass
+    main()
